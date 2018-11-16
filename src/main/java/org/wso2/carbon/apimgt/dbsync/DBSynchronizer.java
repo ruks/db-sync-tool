@@ -7,6 +7,7 @@ import org.apache.log4j.PropertyConfigurator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.wso2.carbon.apimgt.dbsync.dto.AccessTokenDto;
+import org.wso2.carbon.apimgt.dbsync.dto.AuthorizationCodeDto;
 import org.wso2.carbon.apimgt.dbsync.dto.TokenScopeDto;
 
 import java.io.File;
@@ -30,6 +31,7 @@ public class DBSynchronizer {
 
     private static int lastIndexOfAccessToken = -1;
     private static int lastIndexOfAccessTokenScope = -1;
+    private static int lastIndexOfAuthCode = -1;
 
     public static void main(String[] args) {
         PropertyConfigurator.configure("log4j.properties");
@@ -44,18 +46,22 @@ public class DBSynchronizer {
         destDBPass = args[6];
         destDBDriver = args[7];
 
-        if (args.length > 9) {
+        if (args.length > 10) {
             if (!StringUtils.isBlank(args[8])) {
                 lastIndexOfAccessToken = Integer.parseInt(args[8]);
             }
             if (!StringUtils.isBlank(args[9])) {
                 lastIndexOfAccessTokenScope = Integer.parseInt(args[9]);
             }
-        } else if (args.length < 9) {
+            if (!StringUtils.isBlank(args[10])) {
+                lastIndexOfAuthCode = Integer.parseInt(args[10]);
+            }
+        } else if (args.length < 10) {
             int[] values = readIndexes();
             if (values != null) {
                 lastIndexOfAccessToken = values[0];
                 lastIndexOfAccessTokenScope = values[1];
+                lastIndexOfAuthCode = values[2];
             } else {
                 logger.warn("Indexes values is null.Continue with default values(-1,-1)");
             }
@@ -65,15 +71,23 @@ public class DBSynchronizer {
             throw new RuntimeException("Required arguments not provided");
         }
 
-        logger.info("Last index value of IDN_OAUTH2_ACCESS_TOKEN is: " + lastIndexOfAccessToken);
-        logger.info("Last index value of IDN_OAUTH2_ACCESS_TOKEN_SCOPE is: " + lastIndexOfAccessTokenScope);
+        logger.info("Last index value of IDN_OAUTH2_ACCESS_TOKEN_SYNC is: " + lastIndexOfAccessToken);
+        logger.info("Last index value of IDN_OAUTH2_TOKEN_SCOPE_SYNC is: " + lastIndexOfAccessTokenScope);
+        logger.info("Last index value of IDN_OAUTH2_AUTH_CODE_SYNC is: " + lastIndexOfAuthCode);
+
         DBSynchronizer dbSynchronizer = new DBSynchronizer();
+
         ArrayList<AccessTokenDto> accessTokenDtos = dbSynchronizer.readTokenInfo();
         logger.info("No of fetch IDN_OAUTH2_ACCESS_TOKEN records to be merged: " + accessTokenDtos.size());
         dbSynchronizer.writeTokenInfo(accessTokenDtos);
+
         ArrayList<TokenScopeDto> tokenScopeDtos = dbSynchronizer.readTokenScope();
         logger.info("No of fetch IDN_OAUTH2_ACCESS_TOKEN_SCOPE records to be merged: " + tokenScopeDtos.size());
         dbSynchronizer.writeTokenScope(tokenScopeDtos);
+
+        ArrayList<AuthorizationCodeDto> authorizationCodeDtos = dbSynchronizer.readAuthCodes();
+        logger.info("No of fetch IDN_OAUTH2_AUTHORIZATION_CODE records to be merged: " + authorizationCodeDtos.size());
+        dbSynchronizer.writeAuthCodes(authorizationCodeDtos);
 
         if (accessTokenDtos.size() > 0) {
             lastIndexOfAccessToken = accessTokenDtos.get(accessTokenDtos.size() - 1).getId();
@@ -81,11 +95,15 @@ public class DBSynchronizer {
         if (tokenScopeDtos.size() > 0) {
             lastIndexOfAccessTokenScope = tokenScopeDtos.get(tokenScopeDtos.size() - 1).getId();
         }
+        if (authorizationCodeDtos.size() > 0) {
+            lastIndexOfAuthCode = authorizationCodeDtos.get(authorizationCodeDtos.size() - 1).getId();
+        }
 
-        logger.info("Writing last processed index value for IDN_OAUTH2_ACCESS_TOKEN as " + lastIndexOfAccessToken);
-        logger.info("Writing last processed index value for IDN_OAUTH2_ACCESS_TOKEN_SCOPE as "
-                + lastIndexOfAccessTokenScope);
-        writeIndexes(lastIndexOfAccessToken, lastIndexOfAccessTokenScope);
+        logger.info("Writing last processed index value for IDN_OAUTH2_ACCESS_TOKEN_SYNC as " + lastIndexOfAccessToken);
+        logger.info(
+                "Writing last processed index value for IDN_OAUTH2_TOKEN_SCOPE_SYNC as " + lastIndexOfAccessTokenScope);
+        logger.info("Writing last processed index value for IDN_OAUTH2_AUTH_CODE_SYNC as " + lastIndexOfAuthCode);
+        writeIndexes(lastIndexOfAccessToken, lastIndexOfAccessTokenScope, lastIndexOfAuthCode);
     }
 
     private ArrayList<AccessTokenDto> readTokenInfo() {
@@ -311,6 +329,137 @@ public class DBSynchronizer {
         }
     }
 
+    private ArrayList<AuthorizationCodeDto> readAuthCodes() {
+        ArrayList<AuthorizationCodeDto> authorizationCodeDtos = new ArrayList<AuthorizationCodeDto>();
+        Connection conn = null;
+        PreparedStatement readStatement = null;
+        try {
+            Class.forName(sourceDBDriver);
+            conn = DriverManager.getConnection(sourceDBUrl, sourceDBUser, sourceDBPass);
+            String sql;
+            sql = "SELECT * FROM IDN_OAUTH2_AUTH_CODE_SYNC where ID > ? ORDER BY ID ASC";
+            readStatement = conn.prepareStatement(sql);
+            readStatement.setInt(1, lastIndexOfAuthCode);
+            ResultSet rs = readStatement.executeQuery();
+
+            while (rs.next()) {
+                AuthorizationCodeDto dto = new AuthorizationCodeDto();
+                dto.setId(rs.getInt("ID"));
+                dto.setCodeId(rs.getString("CODE_ID"));
+                dto.setAuthorizationCode(rs.getString("AUTHORIZATION_CODE"));
+                dto.setConsumerKeyId(rs.getInt("CONSUMER_KEY_ID"));
+                dto.setCallbackUrl(rs.getString("CALLBACK_URL"));
+                dto.setScope(rs.getString("SCOPE"));
+                dto.setAuthzUser(rs.getString("AUTHZ_USER"));
+                dto.setTenantId(rs.getInt("TENANT_ID"));
+                dto.setUserDomain(rs.getString("USER_DOMAIN"));
+                dto.setTimeCreated(rs.getTimestamp("TIME_CREATED"));
+                dto.setValidityPeriod(rs.getLong("VALIDITY_PERIOD"));
+                dto.setState(rs.getString("STATE"));
+                dto.setTokenId(rs.getString("TOKEN_ID"));
+                dto.setSubjectIdentifier(rs.getString("SUBJECT_IDENTIFIER"));
+                dto.setPkceCodeChallenge(rs.getString("PKCE_CODE_CHALLENGE"));
+                dto.setPkceCodeChallengeMethod(rs.getString("PKCE_CODE_CHALLENGE_METHOD"));
+                dto.setAuthorizationCodeHash(DigestUtils.sha256Hex(dto.getAuthorizationCode()));
+                authorizationCodeDtos.add(dto);
+            }
+            rs.close();
+            readStatement.close();
+            conn.close();
+        } catch (SQLException e) {
+            logger.error("SQL Exception occurred", e);
+        } catch (ClassNotFoundException e) {
+            logger.error("Database Driver not found", e);
+        } finally {
+            try {
+                if (readStatement != null)
+                    readStatement.close();
+            } catch (SQLException e) {
+                logger.error("SQL Exception occurred when closing statement", e);
+            }
+            try {
+                if (conn != null)
+                    conn.close();
+            } catch (SQLException e) {
+                logger.error("Connection close error", e);
+            }
+        }
+        return authorizationCodeDtos;
+    }
+
+    private void writeAuthCodes(ArrayList<AuthorizationCodeDto> authorizationCodeDtos) {
+        PreparedStatement insertStatement = null;
+        String insertQuery = "MERGE INTO IDN_OAUTH2_AUTHORIZATION_CODE USING dual ON (CODE_ID = ?) "
+                + "WHEN MATCHED THEN UPDATE SET "
+                + "AUTHORIZATION_CODE = ?, CONSUMER_KEY_ID = ?, CALLBACK_URL = ?, SCOPE = ?, AUTHZ_USER = ?, TENANT_ID = ?, "
+                + "USER_DOMAIN = ?, TIME_CREATED = ?, VALIDITY_PERIOD = ?, "
+                + "STATE = ?, TOKEN_ID = ?, SUBJECT_IDENTIFIER = ?, PKCE_CODE_CHALLENGE = ?, PKCE_CODE_CHALLENGE_METHOD = ?, AUTHORIZATION_CODE_HASH = ? "
+                + "WHEN NOT MATCHED THEN INSERT VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+
+        Connection conn = null;
+        try {
+            Class.forName(destDBDriver);
+            conn = DriverManager.getConnection(destDBUrl, destDBUser, destDBPass);
+            insertStatement = conn.prepareStatement(insertQuery);
+            for (AuthorizationCodeDto dto : authorizationCodeDtos) {
+                insertStatement.setString(1, dto.getCodeId());
+                insertStatement.setString(2, dto.getAuthorizationCode());
+                insertStatement.setInt(3, dto.getConsumerKeyId());
+                insertStatement.setString(4, dto.getCallbackUrl());
+                insertStatement.setString(5, dto.getScope());
+                insertStatement.setString(6, dto.getAuthzUser());
+                insertStatement.setInt(7, dto.getTenantId());
+                insertStatement.setString(8, dto.getUserDomain());
+                insertStatement.setTimestamp(9, dto.getTimeCreated());
+                insertStatement.setLong(10, dto.getValidityPeriod());
+                insertStatement.setString(11, dto.getState());
+                insertStatement.setString(12, dto.getTokenId());
+                insertStatement.setString(13, dto.getSubjectIdentifier());
+                insertStatement.setString(14, dto.getPkceCodeChallenge());
+                insertStatement.setString(15, dto.getPkceCodeChallengeMethod());
+                insertStatement.setString(16, dto.getAuthorizationCodeHash());
+
+                insertStatement.setString(17, dto.getCodeId());
+                insertStatement.setString(18, dto.getAuthorizationCode());
+                insertStatement.setInt(19, dto.getConsumerKeyId());
+                insertStatement.setString(20, dto.getCallbackUrl());
+                insertStatement.setString(21, dto.getScope());
+                insertStatement.setString(22, dto.getAuthzUser());
+                insertStatement.setInt(23, dto.getTenantId());
+                insertStatement.setString(24, dto.getUserDomain());
+                insertStatement.setTimestamp(25, dto.getTimeCreated());
+                insertStatement.setLong(26, dto.getValidityPeriod());
+                insertStatement.setString(27, dto.getState());
+                insertStatement.setString(28, dto.getTokenId());
+                insertStatement.setString(29, dto.getSubjectIdentifier());
+                insertStatement.setString(30, dto.getPkceCodeChallenge());
+                insertStatement.setString(31, dto.getPkceCodeChallengeMethod());
+                insertStatement.setString(32, dto.getAuthorizationCodeHash());
+                logger.debug("Adding record to IDN_OAUTH2_AUTHORIZATION_CODE: " + dto.toString());
+                insertStatement.addBatch();
+            }
+            insertStatement.executeBatch();
+        } catch (SQLException e) {
+            logger.error("SQL Exception occurred", e);
+        } catch (ClassNotFoundException e) {
+            logger.error("Database Driver not found", e);
+        } finally {
+            try {
+                if (insertStatement != null) {
+                    insertStatement.close();
+                }
+            } catch (SQLException e) {
+                logger.error("SQL Exception occurred when closing statement", e);
+            }
+            try {
+                if (conn != null)
+                    conn.close();
+            } catch (SQLException e) {
+                logger.error("Connection close error", e);
+            }
+        }
+    }
+
     private static int[] readIndexes() {
         String contents;
         try {
@@ -323,17 +472,18 @@ public class DBSynchronizer {
             return null;
         }
         String[] data = contents.trim().split(",");
-        if (data.length < 2) {
+        if (data.length < 3) {
             return null;
         }
-        int[] intData = new int[2];
+        int[] intData = new int[3];
         intData[0] = Integer.parseInt(data[0]);
         intData[1] = Integer.parseInt(data[1]);
+        intData[2] = Integer.parseInt(data[2]);
         return intData;
     }
 
-    private static void writeIndexes(int token, int scope) {
-        String contents = token + "," + scope;
+    private static void writeIndexes(int token, int scope, int authCode) {
+        String contents = token + "," + scope + "," + authCode;
         try {
             FileUtils.writeStringToFile(new File("indexdata"), contents, Charset.defaultCharset(), false);
         } catch (IOException e) {

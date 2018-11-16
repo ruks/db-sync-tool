@@ -3,7 +3,7 @@ file="indexdata"
 if [ ! -f "$file" ]
 then
     echo "$file not found in this directly and create it with default value '-1,-1'"
-	echo "-1,-1" >> $file
+	echo "-1,-1,-1" >> $file
 fi
 
 
