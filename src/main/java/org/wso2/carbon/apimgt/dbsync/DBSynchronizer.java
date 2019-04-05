@@ -1,5 +1,6 @@
 package org.wso2.carbon.apimgt.dbsync;
 
+import com.google.gson.JsonObject;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -137,8 +138,10 @@ public class DBSynchronizer {
                 dto.setTokenState(rs.getString("TOKEN_STATE"));
                 dto.setTokenStateId(rs.getString("TOKEN_STATE_ID"));
                 dto.setSubjectIdentifier(rs.getString("SUBJECT_IDENTIFIER"));
-                dto.setAccessTokenHash(DigestUtils.sha256Hex(rs.getString("ACCESS_TOKEN")));
-                dto.setRefreshTokenHash(DigestUtils.sha256Hex(rs.getString("REFRESH_TOKEN")));
+                String accessTokenHashedJson = toHashedInfo(DigestUtils.sha256Hex(rs.getString("ACCESS_TOKEN")));
+                String refreshTokenHashedJson = toHashedInfo(DigestUtils.sha256Hex(rs.getString("REFRESH_TOKEN")));
+                dto.setAccessTokenHash(accessTokenHashedJson);
+                dto.setRefreshTokenHash(refreshTokenHashedJson);
                 accessTokenDtos.add(dto);
             }
             rs.close();
@@ -360,7 +363,8 @@ public class DBSynchronizer {
                 dto.setSubjectIdentifier(rs.getString("SUBJECT_IDENTIFIER"));
                 dto.setPkceCodeChallenge(rs.getString("PKCE_CODE_CHALLENGE"));
                 dto.setPkceCodeChallengeMethod(rs.getString("PKCE_CODE_CHALLENGE_METHOD"));
-                dto.setAuthorizationCodeHash(DigestUtils.sha256Hex(dto.getAuthorizationCode()));
+                String hashedJson = toHashedInfo(DigestUtils.sha256Hex(dto.getAuthorizationCode()));
+                dto.setAuthorizationCodeHash(hashedJson);
                 authorizationCodeDtos.add(dto);
             }
             rs.close();
@@ -489,5 +493,12 @@ public class DBSynchronizer {
         } catch (IOException e) {
             logger.error("Error occurred while opening file. ", e);
         }
+    }
+
+    private String toHashedInfo(String hash) {
+        JsonObject jsonObject = new JsonObject();
+        jsonObject.addProperty("hash", hash);
+        jsonObject.addProperty("algorithm", "SHA-256");
+        return jsonObject.toString();
     }
 }
